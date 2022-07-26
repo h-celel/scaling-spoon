@@ -1,0 +1,3 @@
+[submodule "proto-spoon"]
+	path = proto-spoon
+	url = https://github.com/h-celel/proto-spoon
