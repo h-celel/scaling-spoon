@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/h-celel/scaling-spoon/internal/config"
 
@@ -16,11 +18,11 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-type UserGRPCService struct {
+type GRPCService struct {
 	examples.UnimplementedServiceServer
 }
 
-func (u UserGRPCService) Hello(_ context.Context, r *examples.HelloRequest) (*examples.HelloResponse, error) {
+func (g GRPCService) Hello(_ context.Context, r *examples.HelloRequest) (*examples.HelloResponse, error) {
 	if message := r.GetMessage(); message != nil {
 		log.Println(message.GetValue())
 	} else {
@@ -28,6 +30,44 @@ func (u UserGRPCService) Hello(_ context.Context, r *examples.HelloRequest) (*ex
 	}
 
 	return &examples.HelloResponse{Message: r.GetMessage()}, nil
+}
+
+func (g GRPCService) StreamingHello(_ *examples.Empty, client examples.Service_StreamingHelloServer) error {
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-client.Context().Done():
+			return nil
+		case <-ticker.C:
+			err := client.Send(&examples.HelloResponse{Message: &examples.Message{Value: "timer goes tick"}})
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (g GRPCService) BidiStream(stream examples.Service_BidiStreamServer) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if message := req.GetMessage(); message != nil {
+			log.Println(message.GetValue())
+		} else {
+			log.Println("Nil")
+		}
+
+		err = stream.Send(&examples.HelloResponse{Message: req.GetMessage()})
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func main() {
@@ -46,7 +86,7 @@ func main() {
 	go func() {
 		defer cancel()
 		server := grpc.NewServer()
-		service := &UserGRPCService{}
+		service := &GRPCService{}
 		examples.RegisterServiceServer(server, service)
 		reflection.Register(server)
 		err := server.Serve(lis)
