@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc/metadata"
+
 	"github.com/h-celel/scaling-spoon/internal/config"
 
 	"github.com/h-celel/scaling-spoon/proto/examples"
@@ -70,6 +72,26 @@ func (g GRPCService) BidiStream(stream examples.Service_BidiStreamServer) error 
 	}
 }
 
+func unaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	log.Println("--> unary interceptor: ", info.FullMethod)
+
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		log.Println("Authorization: ", md.Get("Authorization"))
+	}
+
+	return handler(ctx, req)
+}
+
+func streamInterceptor(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	log.Println("--> stream interceptor: ", info.FullMethod)
+
+	if md, ok := metadata.FromIncomingContext(stream.Context()); ok {
+		log.Println("Authorization: ", md.Get("Authorization"))
+	}
+
+	return handler(srv, stream)
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -85,7 +107,10 @@ func main() {
 
 	go func() {
 		defer cancel()
-		server := grpc.NewServer()
+		server := grpc.NewServer(
+			grpc.UnaryInterceptor(unaryInterceptor),
+			grpc.StreamInterceptor(streamInterceptor),
+		)
 		service := &GRPCService{}
 		examples.RegisterServiceServer(server, service)
 		reflection.Register(server)
